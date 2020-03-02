@@ -2,11 +2,13 @@
 import os
 import pickle as pkl
 import sys
+import json
 
 import networkx as nx
 import numpy as np
 import scipy.sparse as sp
 import torch
+from networkx.readwrite import json_graph
 
 
 def load_data(args, datapath):
@@ -14,11 +16,14 @@ def load_data(args, datapath):
         data = load_data_nc(args.dataset, args.use_feats, datapath, args.split_seed)
     else:
         data = load_data_lp(args.dataset, args.use_feats, datapath)
+        print("yes")
         adj = data['adj_train']
         if args.task == 'lp':
+            print("yes1")
             adj_train, train_edges, train_edges_false, val_edges, val_edges_false, test_edges, test_edges_false = mask_edges(
                     adj, args.val_prop, args.test_prop, args.split_seed
             )
+            print("yes2")
             data['adj_train'] = adj_train
             data['train_edges'], data['train_edges_false'] = train_edges, train_edges_false
             data['val_edges'], data['val_edges_false'] = val_edges, val_edges_false
@@ -77,7 +82,7 @@ def mask_edges(adj, val_prop, test_prop, seed):
     x, y = sp.triu(sp.csr_matrix(1. - adj.toarray())).nonzero()
     neg_edges = np.array(list(zip(x, y)))
     np.random.shuffle(neg_edges)
-
+    print("go")
     m_pos = len(pos_edges)
     n_val = int(m_pos * val_prop)
     n_test = int(m_pos * test_prop)
@@ -119,6 +124,8 @@ def load_data_lp(dataset, use_feats, data_path):
         adj, features = load_citation_data(dataset, use_feats, data_path)[:2]
     elif dataset == 'disease_lp':
         adj, features = load_synthetic_data(dataset, use_feats, data_path)[:2]
+    elif dataset == 'ppi':
+        adj, features = load_ppi_data(dataset, use_feats, data_path)[:2]
     else:
         raise FileNotFoundError('Dataset {} is not supported.'.format(dataset))
     data = {'adj_train': adj, 'features': features}
@@ -133,6 +140,9 @@ def load_data_nc(dataset, use_feats, data_path, split_seed):
         adj, features, labels, idx_train, idx_val, idx_test = load_citation_data(
             dataset, use_feats, data_path, split_seed
         )
+    elif dataset=="ppi":
+        adj, features, labels, idx_train, idx_val, idx_test = load_ppi_data(
+            dataset, use_feats, data_path)
     else:
         if dataset == 'disease_nc':
             val_prop, test_prop = 0.10, 0.60
@@ -152,6 +162,35 @@ def load_data_nc(dataset, use_feats, data_path, split_seed):
 
 
 # ############### DATASETS ####################################
+
+def load_ppi_data(dataset, use_feats, data_path):
+    dataset_dir = 'data/example_data'
+    print("Loading data...")
+    G = json_graph.node_link_graph(json.load(open(dataset_dir + "/ppi-G.json")))
+    adj = nx.adjacency_matrix(G)
+    feats = np.load(dataset_dir + "/ppi-feats.npy")
+    ## Logistic gets thrown off by big counts, so log transform num comments and score
+    feats[:, 0] = np.log(feats[:, 0] + 1.0)
+    feats[:, 1] = np.log(feats[:, 1] - min(np.min(feats[:, 1]), -1))
+    labels=json.load(open(dataset_dir + "/ppi-class_map.json"))
+    # train_ids = [n for n in G.nodes()]
+    # print(train_ids)
+    # exit()
+    # train_labels = np.array([edge_labels_internal[i] for i in train_ids])
+    comps = [comp for comp in nx.connected_components(G) if len(comp)>10]
+    print(len(comps))
+    graphs = [G.subgraph(comp) for comp in comps]
+    id_all = []
+    for comp in comps:
+        id_temp = []
+        for node in comp:
+            id = node
+            id_temp.append(id)
+        id_all.append(np.array(id_temp))
+    # print(len(id_all))
+    # exit()
+    return adj, feats, labels,
+
 
 
 def load_citation_data(dataset_str, use_feats, data_path, split_seed=None):
